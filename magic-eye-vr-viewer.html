@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Eye VR Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #enter-vr-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <button id="enter-vr-button">Enter VR</button>
+    <script>
+        let camera, scene, renderer, magicEyeTexture;
+
+        async function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Load the Magic Eye texture
+            const textureLoader = new THREE.TextureLoader();
+            magicEyeTexture = await new Promise((resolve) => {
+                textureLoader.load('/api/placeholder/1024/1024', resolve);
+            });
+
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            const material = new THREE.MeshBasicMaterial({ map: magicEyeTexture });
+            const plane = new THREE.Mesh(geometry, material);
+            scene.add(plane);
+
+            camera.position.z = 1;
+
+            renderer.xr.enabled = true;
+
+            const enterVRButton = document.getElementById('enter-vr-button');
+            enterVRButton.addEventListener('click', onEnterVR);
+
+            animate();
+        }
+
+        function onEnterVR() {
+            renderer.xr.getSession().then((session) => {
+                session.requestReferenceSpace('local').then((referenceSpace) => {
+                    renderer.xr.setReferenceSpace(referenceSpace);
+                });
+            });
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
