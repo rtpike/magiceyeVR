@@ -3,27 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Magic Eye VR Viewer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <title>WebXR Autostereogram Viewer</title>
     <style>
-        body { margin: 0; overflow: hidden; }
-        #enter-vr-button {
+        body { margin: 0; font-family: Arial, sans-serif; }
+        canvas { display: block; }
+        #controls {
             position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 10px 20px;
-            font-size: 18px;
-            cursor: pointer;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        button, input {
+            margin: 5px 0;
+            padding: 5px;
+            width: 100%;
         }
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
-    <button id="enter-vr-button">Enter VR</button>
+    <div id="controls">
+        <button id="enter-vr-button">Enter VR</button>
+        <button id="invert-button">Invert Right/Left</button>
+        <label for="offset-slider">Image Offset:</label>
+        <input type="range" id="offset-slider" min="0" max="0.25" step="0.01" value="0.125">
+    </div>
     <script>
-        let camera, scene, renderer, magicEyeTexture;
+        let scene, camera, renderer, leftTexture, rightTexture, leftMaterial, rightMaterial, leftPlane, rightPlane;
+        let isInverted = false;
+        let offset = 0.125;
 
-        async function init() {
+        function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
@@ -31,33 +44,51 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            // Load the Magic Eye texture
-            const textureLoader = new THREE.TextureLoader();
-            magicEyeTexture = await new Promise((resolve) => {
-                textureLoader.load('/api/placeholder/1024/1024', resolve);
-            });
+            const loader = new THREE.TextureLoader();
+            leftTexture = loader.load('https://i.imgur.com/MUabKu0.jpeg');
+            rightTexture = loader.load('https://i.imgur.com/MUabKu0.jpeg');
 
-            const geometry = new THREE.PlaneGeometry(2, 2);
-            const material = new THREE.MeshBasicMaterial({ map: magicEyeTexture });
-            const plane = new THREE.Mesh(geometry, material);
-            scene.add(plane);
+            leftMaterial = new THREE.MeshBasicMaterial({ map: leftTexture });
+            rightMaterial = new THREE.MeshBasicMaterial({ map: rightTexture });
 
-            camera.position.z = 1;
+            const planeGeometry = new THREE.PlaneGeometry(16, 9);
+            leftPlane = new THREE.Mesh(planeGeometry, leftMaterial);
+            rightPlane = new THREE.Mesh(planeGeometry, rightMaterial);
+
+            leftPlane.position.set(-8 - offset * 16, 0, -10);
+            rightPlane.position.set(8 + offset * 16, 0, -10);
+
+            scene.add(leftPlane);
+            scene.add(rightPlane);
+
+            camera.position.z = 10;
 
             renderer.xr.enabled = true;
 
-            const enterVRButton = document.getElementById('enter-vr-button');
-            enterVRButton.addEventListener('click', onEnterVR);
+            document.getElementById('enter-vr-button').addEventListener('click', () => {
+                if (renderer.xr.isPresenting) {
+                    renderer.xr.getSession().end();
+                } else {
+                    renderer.xr.enterVR();
+                }
+            });
+
+            document.getElementById('invert-button').addEventListener('click', invertImage);
+            document.getElementById('offset-slider').addEventListener('input', updateOffset);
 
             animate();
         }
 
-        function onEnterVR() {
-            renderer.xr.getSession().then((session) => {
-                session.requestReferenceSpace('local').then((referenceSpace) => {
-                    renderer.xr.setReferenceSpace(referenceSpace);
-                });
-            });
+        function invertImage() {
+            isInverted = !isInverted;
+            leftPlane.scale.x *= -1;
+            rightPlane.scale.x *= -1;
+        }
+
+        function updateOffset(event) {
+            offset = parseFloat(event.target.value);
+            leftPlane.position.x = -8 - offset * 16;
+            rightPlane.position.x = 8 + offset * 16;
         }
 
         function animate() {
