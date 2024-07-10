@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebXR Autostereogram Viewer</title>
+    <title>WebXR Autostereogram Viewer (Quest 3 Compatible)</title>
     <style>
         body { margin: 0; font-family: Arial, sans-serif; }
         canvas { display: block; }
@@ -21,6 +21,10 @@
             padding: 5px;
             width: 100%;
         }
+        #status {
+            color: yellow;
+            margin-top: 10px;
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
@@ -30,6 +34,7 @@
         <button id="invert-button">Invert Right/Left</button>
         <label for="offset-slider">Image Offset:</label>
         <input type="range" id="offset-slider" min="0" max="0.25" step="0.01" value="0.125">
+        <div id="status"></div>
     </div>
     <script>
         let scene, camera, renderer, leftTexture, rightTexture, leftMaterial, rightMaterial, leftPlane, rightPlane;
@@ -40,7 +45,7 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            renderer = new THREE.WebGLRenderer();
+            renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
@@ -65,18 +70,35 @@
 
             renderer.xr.enabled = true;
 
-            document.getElementById('enter-vr-button').addEventListener('click', () => {
-                if (renderer.xr.isPresenting) {
-                    renderer.xr.getSession().end();
-                } else {
-                    renderer.xr.enterVR();
-                }
-            });
-
+            document.getElementById('enter-vr-button').addEventListener('click', enterVR);
             document.getElementById('invert-button').addEventListener('click', invertImage);
             document.getElementById('offset-slider').addEventListener('input', updateOffset);
 
+            window.addEventListener('resize', onWindowResize, false);
+
             animate();
+        }
+
+        function enterVR() {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = 'Attempting to enter VR...';
+
+            if (navigator.xr) {
+                navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                    if (supported) {
+                        navigator.xr.requestSession('immersive-vr').then((session) => {
+                            renderer.xr.setSession(session);
+                            statusElement.textContent = 'Entered VR mode';
+                        }).catch((error) => {
+                            statusElement.textContent = 'Error entering VR: ' + error;
+                        });
+                    } else {
+                        statusElement.textContent = 'VR not supported on this device';
+                    }
+                });
+            } else {
+                statusElement.textContent = 'WebXR not available in this browser';
+            }
         }
 
         function invertImage() {
@@ -89,6 +111,12 @@
             offset = parseFloat(event.target.value);
             leftPlane.position.x = -8 - offset * 16;
             rightPlane.position.x = 8 + offset * 16;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
         function animate() {
