@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebXR Autostereogram Viewer (Quest 3 Debug Version)</title>
+    <title>WebXR Stereographic 3D Image Viewer</title>
     <style>
         body { margin: 0; font-family: Arial, sans-serif; background-color: #f0f0f0; }
         canvas { display: block; }
@@ -35,8 +35,8 @@
     <div id="controls">
         <button id="enter-vr-button">Enter VR</button>
         <button id="invert-button">Invert Right/Left</button>
-        <label for="offset-slider">Image Offset:</label>
-        <input type="range" id="offset-slider" min="0" max="0.25" step="0.01" value="0.125">
+        <label for="offset-slider">Image Separation:</label>
+        <input type="range" id="offset-slider" min="0" max="0.1" step="0.001" value="0.064">
         <div id="status"></div>
         <div id="debug"></div>
     </div>
@@ -45,7 +45,8 @@
 
         let scene, camera, renderer, leftTexture, rightTexture, leftMaterial, rightMaterial, leftPlane, rightPlane;
         let isInverted = false;
-        let offset = 0.125;
+        let separation = 0.064; // Default separation in meters (average human IPD)
+        let currentSession = null;
 
         const statusElement = document.getElementById('status');
         const debugElement = document.getElementById('debug');
@@ -79,28 +80,32 @@
             leftMaterial = new THREE.MeshBasicMaterial({ map: leftTexture });
             rightMaterial = new THREE.MeshBasicMaterial({ map: rightTexture });
 
-            const planeGeometry = new THREE.PlaneGeometry(16, 9);
+            const planeGeometry = new THREE.PlaneGeometry(1, 1);
             leftPlane = new THREE.Mesh(planeGeometry, leftMaterial);
             rightPlane = new THREE.Mesh(planeGeometry, rightMaterial);
 
-            leftPlane.position.set(-8 - offset * 16, 0, -10);
-            rightPlane.position.set(8 + offset * 16, 0, -10);
+            updateImagePositions();
 
             scene.add(leftPlane);
             scene.add(rightPlane);
 
-            camera.position.z = 10;
+            camera.position.z = 1;
 
             renderer.xr.enabled = true;
 
             document.getElementById('enter-vr-button').addEventListener('click', enterVR);
             document.getElementById('invert-button').addEventListener('click', invertImage);
-            document.getElementById('offset-slider').addEventListener('input', updateOffset);
+            document.getElementById('offset-slider').addEventListener('input', updateSeparation);
 
             window.addEventListener('resize', onWindowResize, false);
 
             log('Initialization complete');
             animate();
+        }
+
+        function updateImagePositions() {
+            leftPlane.position.set(-separation / 2, 0, -1);
+            rightPlane.position.set(separation / 2, 0, -1);
         }
 
         function enterVR() {
@@ -114,24 +119,7 @@
                         log('immersive-vr is supported');
                         navigator.xr.requestSession('immersive-vr', {
                             optionalFeatures: ['local-floor', 'bounded-floor']
-                        }).then((session) => {
-                            log('VR session created');
-                            session.addEventListener('end', () => {
-                                log('VR session ended');
-                                statusElement.textContent = 'VR session ended';
-                            });
-                            renderer.xr.setSession(session).then(() => {
-                                log('Entered VR mode');
-                                statusElement.textContent = 'Entered VR mode';
-                                session.requestReferenceSpace('local').then((referenceSpace) => {
-                                    log('Reference space acquired');
-                                }).catch((error) => {
-                                    log('Error acquiring reference space: ' + error);
-                                });
-                            }).catch((error) => {
-                                log('Error setting VR session: ' + error);
-                            });
-                        }).catch((error) => {
+                        }).then(onSessionStarted).catch((error) => {
                             log('Error requesting VR session: ' + error);
                             statusElement.textContent = 'Error entering VR: ' + error;
                         });
@@ -146,18 +134,46 @@
             }
         }
 
+        function onSessionStarted(session) {
+            log('VR session started');
+            session.addEventListener('end', onSessionEnded);
+            renderer.xr.setSession(session).then(() => {
+                log('Entered VR mode');
+                statusElement.textContent = 'Entered VR mode';
+                currentSession = session;
+                session.requestReferenceSpace('local').then((referenceSpace) => {
+                    log('Reference space acquired');
+                }).catch((error) => {
+                    log('Error acquiring reference space: ' + error);
+                });
+            }).catch((error) => {
+                log('Error setting VR session: ' + error);
+            });
+        }
+
+        function onSessionEnded() {
+            log('VR session ended');
+            statusElement.textContent = 'VR session ended';
+            currentSession = null;
+        }
+
+        function exitVR() {
+            if (currentSession) {
+                log('Exiting VR...');
+                currentSession.end();
+            }
+        }
+
         function invertImage() {
             isInverted = !isInverted;
-            leftPlane.scale.x *= -1;
-            rightPlane.scale.x *= -1;
+            [leftPlane.material, rightPlane.material] = [rightPlane.material, leftPlane.material];
             log('Images inverted');
         }
 
-        function updateOffset(event) {
-            offset = parseFloat(event.target.value);
-            leftPlane.position.x = -8 - offset * 16;
-            rightPlane.position.x = 8 + offset * 16;
-            log('Offset updated: ' + offset);
+        function updateSeparation(event) {
+            separation = parseFloat(event.target.value);
+            updateImagePositions();
+            log('Separation updated: ' + separation);
         }
 
         function onWindowResize() {
@@ -167,19 +183,59 @@
             log('Window resized');
         }
 
+        function checkControllerButtons(session) {
+            if (!session) return;
+            
+            for (let source of session.inputSources) {
+                if (source.gamepad) {
+                    const gamepad = source.gamepad;
+                    // Button indices: 5 for B button (right controller), 1 for Y button (left controller)
+                    if (gamepad.buttons[5]?.pressed || gamepad.buttons[1]?.pressed) {
+                        log('B or Y button pressed, exiting VR');
+                        exitVR();
+                        return;
+                    }
+                }
+            }
+        }
+
         function animate() {
             renderer.setAnimationLoop(render);
         }
 
         function render(timestamp, frame) {
             if (frame) {
+                const session = frame.session;
+                checkControllerButtons(session);
+
                 const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
                 if (pose) {
-                    // VR is active and we have a valid pose
-                    log('Rendering VR frame');
+                    for (let view of pose.views) {
+                        const viewport = session.renderState.baseLayer.getViewport(view);
+                        renderer.setViewport(viewport);
+                        
+                        camera.projectionMatrix.fromArray(view.projectionMatrix);
+                        camera.matrix.fromArray(view.transform.matrix);
+                        camera.updateMatrixWorld(true);
+
+                        // Ensure only the correct image is visible to each eye
+                        if (view.eye === 'left') {
+                            leftPlane.visible = true;
+                            rightPlane.visible = false;
+                        } else if (view.eye === 'right') {
+                            leftPlane.visible = false;
+                            rightPlane.visible = true;
+                        }
+
+                        renderer.render(scene, camera);
+                    }
                 }
+            } else {
+                // Non-VR rendering
+                leftPlane.visible = true;
+                rightPlane.visible = true;
+                renderer.render(scene, camera);
             }
-            renderer.render(scene, camera);
         }
 
         init();
