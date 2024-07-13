@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebXR Autostereogram Viewer (Quest 3 Compatible)</title>
+    <title>WebXR Autostereogram Viewer (Quest 3 Debug Version)</title>
     <style>
-        body { margin: 0; font-family: Arial, sans-serif; }
+        body { margin: 0; font-family: Arial, sans-serif; background-color: #f0f0f0; }
         canvas { display: block; }
         #controls {
             position: absolute;
@@ -15,18 +15,21 @@
             color: white;
             padding: 10px;
             border-radius: 5px;
+            z-index: 100;
         }
         button, input {
             margin: 5px 0;
             padding: 5px;
             width: 100%;
         }
-        #status {
+        #status, #debug {
             color: yellow;
             margin-top: 10px;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
         }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
     <div id="controls">
@@ -35,13 +38,25 @@
         <label for="offset-slider">Image Offset:</label>
         <input type="range" id="offset-slider" min="0" max="0.25" step="0.01" value="0.125">
         <div id="status"></div>
+        <div id="debug"></div>
     </div>
-    <script>
+    <script type="module">
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
+
         let scene, camera, renderer, leftTexture, rightTexture, leftMaterial, rightMaterial, leftPlane, rightPlane;
         let isInverted = false;
         let offset = 0.125;
 
+        const statusElement = document.getElementById('status');
+        const debugElement = document.getElementById('debug');
+
+        function log(message) {
+            debugElement.textContent += message + '\n';
+            debugElement.scrollTop = debugElement.scrollHeight;
+        }
+
         function init() {
+            log('Initializing...');
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
@@ -50,8 +65,16 @@
             document.body.appendChild(renderer.domElement);
 
             const loader = new THREE.TextureLoader();
-            leftTexture = loader.load('https://i.imgur.com/MUabKu0.jpeg');
-            rightTexture = loader.load('https://i.imgur.com/MUabKu0.jpeg');
+            leftTexture = loader.load('https://i.imgur.com/MUabKu0.jpeg', 
+                () => log('Left texture loaded'),
+                undefined,
+                (err) => log('Error loading left texture: ' + err)
+            );
+            rightTexture = loader.load('https://i.imgur.com/MUabKu0.jpeg',
+                () => log('Right texture loaded'),
+                undefined,
+                (err) => log('Error loading right texture: ' + err)
+            );
 
             leftMaterial = new THREE.MeshBasicMaterial({ map: leftTexture });
             rightMaterial = new THREE.MeshBasicMaterial({ map: rightTexture });
@@ -76,27 +99,49 @@
 
             window.addEventListener('resize', onWindowResize, false);
 
+            log('Initialization complete');
             animate();
         }
 
         function enterVR() {
-            const statusElement = document.getElementById('status');
+            log('Attempting to enter VR...');
             statusElement.textContent = 'Attempting to enter VR...';
 
             if (navigator.xr) {
+                log('WebXR is supported');
                 navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
                     if (supported) {
-                        navigator.xr.requestSession('immersive-vr').then((session) => {
-                            renderer.xr.setSession(session);
-                            statusElement.textContent = 'Entered VR mode';
+                        log('immersive-vr is supported');
+                        navigator.xr.requestSession('immersive-vr', {
+                            optionalFeatures: ['local-floor', 'bounded-floor']
+                        }).then((session) => {
+                            log('VR session created');
+                            session.addEventListener('end', () => {
+                                log('VR session ended');
+                                statusElement.textContent = 'VR session ended';
+                            });
+                            renderer.xr.setSession(session).then(() => {
+                                log('Entered VR mode');
+                                statusElement.textContent = 'Entered VR mode';
+                                session.requestReferenceSpace('local').then((referenceSpace) => {
+                                    log('Reference space acquired');
+                                }).catch((error) => {
+                                    log('Error acquiring reference space: ' + error);
+                                });
+                            }).catch((error) => {
+                                log('Error setting VR session: ' + error);
+                            });
                         }).catch((error) => {
+                            log('Error requesting VR session: ' + error);
                             statusElement.textContent = 'Error entering VR: ' + error;
                         });
                     } else {
+                        log('immersive-vr is not supported');
                         statusElement.textContent = 'VR not supported on this device';
                     }
                 });
             } else {
+                log('WebXR not available in this browser');
                 statusElement.textContent = 'WebXR not available in this browser';
             }
         }
@@ -105,25 +150,35 @@
             isInverted = !isInverted;
             leftPlane.scale.x *= -1;
             rightPlane.scale.x *= -1;
+            log('Images inverted');
         }
 
         function updateOffset(event) {
             offset = parseFloat(event.target.value);
             leftPlane.position.x = -8 - offset * 16;
             rightPlane.position.x = 8 + offset * 16;
+            log('Offset updated: ' + offset);
         }
 
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            log('Window resized');
         }
 
         function animate() {
             renderer.setAnimationLoop(render);
         }
 
-        function render() {
+        function render(timestamp, frame) {
+            if (frame) {
+                const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
+                if (pose) {
+                    // VR is active and we have a valid pose
+                    log('Rendering VR frame');
+                }
+            }
             renderer.render(scene, camera);
         }
 
