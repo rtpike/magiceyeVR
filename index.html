@@ -47,6 +47,9 @@
         let isInverted = false;
         let separation = 0.064; // Default separation in meters (average human IPD)
         let currentSession = null;
+        let controllerLeft, controllerRight;
+        let raycaster, intersectedObject;
+        let vrControlPanel, invertButton, separationSlider;
 
         const statusElement = document.getElementById('status');
         const debugElement = document.getElementById('debug');
@@ -99,8 +102,68 @@
 
             window.addEventListener('resize', onWindowResize, false);
 
+            // Initialize raycaster for VR controls
+            raycaster = new THREE.Raycaster();
+
+            createVRControlPanel();
+
             log('Initialization complete');
             animate();
+        }
+
+        function createVRControlPanel() {
+            vrControlPanel = new THREE.Group();
+
+            const panelGeometry = new THREE.PlaneGeometry(0.4, 0.2);
+            const panelMaterial = new THREE.MeshBasicMaterial({ color: 0x444444 });
+            const panelMesh = new THREE.Mesh(panelGeometry, panelMaterial);
+            vrControlPanel.add(panelMesh);
+
+            const fontLoader = new THREE.FontLoader();
+            fontLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', function(font) {
+                const textGeometry = new THREE.TextGeometry('Invert', {
+                    font: font,
+                    size: 0.02,
+                    height: 0.001
+                });
+                const textMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+                textMesh.position.set(-0.15, 0.05, 0.001);
+                vrControlPanel.add(textMesh);
+
+                const separationTextGeometry = new THREE.TextGeometry('Separation', {
+                    font: font,
+                    size: 0.02,
+                    height: 0.001
+                });
+                const separationTextMesh = new THREE.Mesh(separationTextGeometry, textMaterial);
+                separationTextMesh.position.set(-0.15, -0.05, 0.001);
+                vrControlPanel.add(separationTextMesh);
+            });
+
+            invertButton = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.1, 0.05),
+                new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+            );
+            invertButton.position.set(0.1, 0.05, 0.001);
+            vrControlPanel.add(invertButton);
+
+            separationSlider = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.2, 0.02),
+                new THREE.MeshBasicMaterial({ color: 0x0000ff })
+            );
+            separationSlider.position.set(0, -0.05, 0.001);
+            vrControlPanel.add(separationSlider);
+
+            const sliderKnob = new THREE.Mesh(
+                new THREE.CircleGeometry(0.01, 32),
+                new THREE.MeshBasicMaterial({ color: 0xffff00 })
+            );
+            sliderKnob.position.set(-0.1 + separation, -0.05, 0.002);
+            vrControlPanel.add(sliderKnob);
+
+            vrControlPanel.position.set(0, 0, -0.5);
+            scene.add(vrControlPanel);
         }
 
         function updateImagePositions() {
@@ -141,6 +204,17 @@
                 log('Entered VR mode');
                 statusElement.textContent = 'Entered VR mode';
                 currentSession = session;
+                
+                controllerLeft = renderer.xr.getController(0);
+                controllerRight = renderer.xr.getController(1);
+                scene.add(controllerLeft);
+                scene.add(controllerRight);
+
+                controllerLeft.addEventListener('selectstart', onSelectStart);
+                controllerRight.addEventListener('selectstart', onSelectStart);
+                controllerLeft.addEventListener('selectend', onSelectEnd);
+                controllerRight.addEventListener('selectend', onSelectEnd);
+
                 session.requestReferenceSpace('local').then((referenceSpace) => {
                     log('Reference space acquired');
                 }).catch((error) => {
@@ -170,8 +244,8 @@
             log('Images inverted');
         }
 
-        function updateSeparation(event) {
-            separation = parseFloat(event.target.value);
+        function updateSeparation(newSeparation) {
+            separation = newSeparation;
             updateImagePositions();
             log('Separation updated: ' + separation);
         }
@@ -181,6 +255,36 @@
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
             log('Window resized');
+        }
+
+        function onSelectStart(event) {
+            const controller = event.target;
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                intersectedObject = intersection.object;
+
+                if (intersectedObject === invertButton) {
+                    invertImage();
+                } else if (intersectedObject === separationSlider) {
+                    const sliderWidth = 0.2;
+                    const newSeparation = Math.max(0, Math.min(0.1, (intersection.point.x - separationSlider.position.x + sliderWidth / 2) / sliderWidth));
+                    updateSeparation(newSeparation);
+                    vrControlPanel.children[vrControlPanel.children.length - 1].position.x = -0.1 + newSeparation * 0.2;
+                }
+            }
+        }
+
+        function onSelectEnd(event) {
+            intersectedObject = null;
+        }
+
+        function getIntersections(controller) {
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            return raycaster.intersectObjects(vrControlPanel.children);
         }
 
         function checkControllerButtons(session) {
@@ -207,7 +311,7 @@
             if (frame) {
                 const session = frame.session;
                 checkControllerButtons(session);
-
+                
                 const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
                 if (pose) {
                     for (let view of pose.views) {
