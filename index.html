@@ -36,7 +36,7 @@
         <button id="enter-vr-button">Enter VR</button>
         <button id="invert-button">Invert Right/Left</button>
         <label for="offset-slider">Image Separation:</label>
-        <input type="range" id="offset-slider" min="0" max="0.1" step="0.001" value="0.064">
+        <input type="range" id="offset-slider" min="0" max="1" step="0.002" value="0.064">
         <div id="status"></div>
         <div id="debug"></div>
     </div>
@@ -201,8 +201,8 @@
                     if (gamepad.axes[2] !== undefined) {
                         const joystickX = gamepad.axes[2];
                         if (Math.abs(joystickX - lastRightJoystickX) > 0.1) {
-                            separation += (joystickX - lastRightJoystickX) * 0.001;
-                            separation = Math.max(0, Math.min(0.1, separation));
+                            separation += (joystickX - lastRightJoystickX) * 0.002;
+                            separation = Math.max(0, Math.min(1, separation));
                             updateImagePositions();
                             log('Separation adjusted: ' + separation.toFixed(3));
                             lastRightJoystickX = joystickX;
